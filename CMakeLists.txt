@@ -10,11 +10,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 option(BUILD_FOR_COMPACTRIO "Build for CompactRIO (Linux-based)" ON)
 option(BUILD_FOR_WINDOWS "Build for Windows" OFF)
 option(BUILD_FOR_UBUNTU "Build for Ubuntu" OFF)
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Og")
 
+if (CMAKE_BUILD_TYPE STREQUAL  "")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O1")
+endif()
 # 소스 파일 추가
 set(SOURCES src/liegroup_robotics.cpp)
 set(TEST_SOURCES src/callingSharedObject.cpp)
 
+# CompactRIO 타겟 설정 (Linux 환경)
 # CompactRIO 타겟 설정 (Linux 환경)
 if(BUILD_FOR_COMPACTRIO)
     message(STATUS "Building for CompactRIO...")
@@ -35,8 +40,13 @@ if(BUILD_FOR_COMPACTRIO)
 
     # 컴파일러 플래그 설정
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fmessage-length=0")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g3")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+    
+    # Release 모드 설정
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")  # Release 모드 최적화 플래그
+    else()
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")  # Debug 모드 플래그
+    endif()
 
     # 인클루드 디렉토리 설정 (헤더 파일 경로)
     include_directories(${CMAKE_SYSROOT}/usr/include)
@@ -81,28 +91,38 @@ if(BUILD_FOR_WINDOWS)
     set(CMAKE_CXX_COMPILER i686-w64-mingw32-g++)
 
     # Windows에서 DLL 파일을 만들기 위한 전처리기 정의
-    add_definitions(-DMYLIB_EXPORTS)
-
     # 32비트 DLL 파일 생성 (링커에 32비트 타겟 명시)
     set(CMAKE_C_FLAGS "-m32")
     set(CMAKE_CXX_FLAGS "-m32")
     set(CMAKE_EXE_LINKER_FLAGS "-m32")
 
+    # Release 모드 설정
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")  # Release 모드 최적화 플래그
+    else()
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")  # Debug 모드 플래그
+    endif()
+
     # Windows용 `.dll` 라이브러리 생성
     add_library(liegroup_robotics_win SHARED ${SOURCES})
     target_include_directories(liegroup_robotics_win PUBLIC ${CMAKE_SOURCE_DIR}/src)
-
+    include_directories(${CMAKE_SOURCE_DIR}/src)
+    include_directories(${PROJECT_SOURCE_DIR}/include)
+    
     # DLL 파일 생성 시 필요한 추가 플래그 설정 (MinGW 링커 옵션)
     set_target_properties(liegroup_robotics_win PROPERTIES PREFIX "" SUFFIX ".dll")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libgcc -static-libstdc++")
 
     # Windows 테스트 실행 파일 생성
     add_executable(test_liegroup_robotics_win ${TEST_SOURCES})
     target_link_libraries(test_liegroup_robotics_win liegroup_robotics_win)
+    add_definitions(-DLIEGROUP_EXPORTS)
 
     # Windows 빌드 시 다른 타겟 설정 무시
     set(BUILD_FOR_COMPACTRIO OFF)
     set(BUILD_FOR_UBUNTU OFF)
 endif()
+
 
 # Ubuntu 타겟 설정 (일반적인 빌드 방식)
 if(BUILD_FOR_UBUNTU)

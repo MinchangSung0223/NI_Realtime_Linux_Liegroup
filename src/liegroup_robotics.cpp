@@ -892,7 +892,7 @@ void JointTrajectory(const JVec q0, const JVec qT, double Tf, double t , int met
 
 extern "C" {
 
-LIEGROUP_API double* GravityForces_wrapper(const double* thetalist_array) {
+LIEGROUP_API void GravityForces_wrapper(const double* thetalist_array,double* torque_array) {
     // JVec 및 Vector3d를 배열에서 변환
     JVec thetalist;
     Vector3d g;
@@ -1010,11 +1010,10 @@ LIEGROUP_API double* GravityForces_wrapper(const double* thetalist_array) {
     // 결과 배열로 변환 (LabVIEW에서 사용할 수 있도록)
     double* result_array = new double[7];
     for (int i = 0; i < 7; i++) {
-        result_array[i] = result[i];
+        // result_array[i] = result[i];
+		torque_array[i] = result[i];
     }
 
-    // 결과 반환 (LabVIEW에서 배열로 받음)
-    return result_array;
 }
 
 }

@@ -96,7 +96,8 @@ namespace lr {
 extern "C" {
 #endif
 
-LIEGROUP_API double* GravityForces_wrapper(const double* thetalist_array) ;
+// LIEGROUP_API double* GravityForces_wrapper(const double* thetalist_array) ;
+LIEGROUP_API void GravityForces_wrapper(const double* thetalist_array,double* torque_array) ;
 #ifdef __cplusplus
 }
 #endif
