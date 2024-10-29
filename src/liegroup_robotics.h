@@ -88,7 +88,10 @@ namespace lr {
     //void LieScrewTrajectory(const SE3 X0,const SE3 XT,const Vector6d V0,const Vector6d VT,const Vector6d dV0,const Vector6d dVT,double Tf,int N,std::vector<SE3>&Xd_list,std::vector<Vector6d>&Vd_list,std::vector<Vector6d>&dVd_list);
     void LieScrewTrajectory(const SE3 X0,const SE3 XT,const Vector6d V0,const Vector6d VT,const Vector6d dV0,const Vector6d dVT,double Tf,double t,SE3& T_des,Vector6d& V_des,Vector6d& V_des_dot);
     void JointTrajectory(const JVec q0, const JVec qT, double Tf, double t , int method , JVec& q_des, JVec& q_dot_des, JVec& q_ddot_des) ;
- 
+  JVec pRNE(const JVec& thetalist, const JVec& dthetalist, const JVec& ddthetalist,const JVec& thetalist_ref, const JVec& dthetalist_ref, const JVec& ddthetalist_ref,const Vector3d& g, const Vector6d& Ftip, const std::vector<SE3>& Mlist,
+									const std::vector<Matrix6d>& Glist, const ScrewList& Slist);
+                  MatrixNd CoriolisMatrix(const JVec& thetalist,const JVec& dthetalist,const std::vector<SE3>& Mlist,
+									const std::vector<Matrix6d>& Glist, const ScrewList& Slist);
 }
 
 
@@ -97,7 +100,9 @@ extern "C" {
 #endif
 
 // LIEGROUP_API double* GravityForces_wrapper(const double* thetalist_array) ;
-LIEGROUP_API void GravityForces_wrapper(const double* thetalist_array,double* torque_array) ;
+// LIEGROUP_API void GravityForces_wrapper(const double* thetalist_array,double* torque_array) ;
+LIEGROUP_API void CoriolisMatrix_wrapper(const double* thetalist_array,const double* dthetalist_array,double* C_array) ;
+
 #ifdef __cplusplus
 }
 #endif

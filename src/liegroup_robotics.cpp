@@ -287,7 +287,59 @@ namespace lr {
 		return !err;
 	}	
 
+	JVec pRNE(const JVec& thetalist, const JVec& dthetalist, const JVec& ddthetalist,const JVec& thetalist_ref, const JVec& dthetalist_ref, const JVec& ddthetalist_ref,
+									const Vector3d& g, const Vector6d& Ftip, const vector<SE3>& Mlist,
+									const vector<Matrix6d>& Glist, const ScrewList& Slist) {
+	    // the size of the lists
+		int n = JOINTNUM;
 
+		SE3 Mi = SE3::Identity();
+		Matrix6xn Ai = Matrix6xn::Zero();
+		vector<Matrix6d> AdTi;
+		for (int i = 0; i < n+1; i++) {
+			AdTi.push_back(Matrix6d::Zero());
+		}
+		Matrix6xn_1 Vi = Matrix6xn_1::Zero();    // velocity
+		Matrix6xn_1 Vi_ref = Matrix6xn_1::Zero();    // velocity
+
+		Matrix6xn_1 Vdi = Matrix6xn_1::Zero();   // acceleration
+		Matrix6xn_1 Vdi_ref = Matrix6xn_1::Zero();   // acceleration
+
+		//Vdi.block(3, 0, 3, 1) = - g;
+		Vdi.block(0, 0, 3, 1) = - g;
+		Vdi_ref.block(0, 0, 3, 1) = - g;
+
+		AdTi[n] = Ad(TransInv(Mlist[n]));
+		Vector6d Fi = Ftip;
+
+		JVec taulist = JVec::Zero();
+
+		// forward pass
+		for (int i = 0; i < n; i++) {
+			Mi = Mi * Mlist[i];
+			Ai.col(i) = Ad(TransInv(Mi))*Slist.col(i);
+			
+
+			AdTi[i] = Ad(MatrixExp6(VecTose3(Ai.col(i)*-thetalist(i)))
+			          * TransInv(Mlist[i]));
+			Vi.col(i+1) = AdTi[i] * Vi.col(i) + Ai.col(i) * dthetalist(i);
+			
+			Vdi.col(i+1) = AdTi[i] * Vdi.col(i) + Ai.col(i) * ddthetalist(i)
+						   + ad(Vi.col(i+1)) * Ai.col(i) * dthetalist(i); // this index is different from book!
+			Vi_ref.col(i+1) = AdTi[i] * Vi_ref.col(i) + Ai.col(i) * dthetalist_ref(i);
+			
+			Vdi_ref.col(i+1) = AdTi[i] * Vdi_ref.col(i) + Ai.col(i) * ddthetalist_ref(i)
+						   + ad(Vi_ref.col(i+1)) * Ai.col(i) * dthetalist_ref(i); // this index is different from book!
+		}
+
+		// backward pass
+		for (int i = n-1; i >= 0; i--) {
+			Fi = AdTi[i+1].transpose() * Fi + Glist[i] * Vdi_ref.col(i+1)
+			 +( Glist[i]*ad(Vi_ref.col(i+1))-ad(Vi.col(i+1)).transpose()*Glist[i])*Vi_ref.col(i+1);
+			taulist(i) = Fi.transpose() * Ai.col(i);
+		}
+		return taulist;
+	}
 	JVec InverseDynamics(const JVec& thetalist, const JVec& dthetalist, const JVec& ddthetalist,
 									const Vector3d& g, const Vector6d& Ftip, const vector<SE3>& Mlist,
 									const vector<Matrix6d>& Glist, const ScrewList& Slist) {
@@ -333,6 +385,17 @@ namespace lr {
 		return taulist;
 	}
 	
+	MatrixNd CoriolisMatrix(const JVec& thetalist,const JVec& dthetalist,const vector<SE3>& Mlist,
+									const vector<Matrix6d>& Glist, const ScrewList& Slist){
+										MatrixNd C = MatrixNd::Zero();
+										for(int i =0;i<JOINTNUM;i++){
+											JVec ei = JVec::Zero();
+											ei(i) = 1;
+											C.col(i) = pRNE(thetalist,dthetalist,JVec::Zero(),thetalist,ei,JVec::Zero(),Vector3d::Zero(),Vector6d::Zero(),Mlist,Glist,Slist);
+										}
+										return C;
+									}
+
 	JVec InverseDynamics(const JVec& thetalist, const JVec& dthetalist, const JVec& ddthetalist,
 									const Vector3d& g, const Vector6d& Ftip, const vector<SE3>& Mlist,
 									const vector<Matrix6d>& Glist, const ScrewList& Slist,double eef_mass) {
@@ -892,7 +955,7 @@ void JointTrajectory(const JVec q0, const JVec qT, double Tf, double t , int met
 
 extern "C" {
 
-LIEGROUP_API void GravityForces_wrapper(const double* thetalist_array,double* torque_array) {
+ void GravityForces_wrapper(const double* thetalist_array,double* torque_array) {
     // JVec 및 Vector3d를 배열에서 변환
     JVec thetalist;
     Vector3d g;
@@ -1015,5 +1078,134 @@ LIEGROUP_API void GravityForces_wrapper(const double* thetalist_array,double* to
     }
 
 }
+
+LIEGROUP_API void CoriolisMatrix_wrapper(const double* thetalist_array,const double* dthetalist_array,double* C_array) {
+    // JVec 및 Vector3d를 배열에서 변환
+    JVec thetalist,dthetalist;
+    Vector3d g;
+    g << 0, 0, -9.8;
+
+    for (int i = 0; i < 7; i++) {
+        thetalist[i] = thetalist_array[i];  // JVec에 값 할당
+		dthetalist[i] = dthetalist_array[i];
+    }
+
+    // Mlist 값을 8개의 SE3 행렬로 변환하여 설정
+    std::vector<SE3> Mlist(8);
+    Mlist[0] << 1.0, 0.0, 0.0, -0.000237,
+                0.0, 1.0, 0.0, -0.043103,
+                0.0, 0.0, 1.0, 0.209654,
+                0.0, 0.0, 0.0, 1.0;
+    
+    Mlist[1] << 0.0, 1.0, 0.0, 0.00022,
+                0.0, 0.0, -1.0, -0.145209,
+                -1.0, 0.0, 0.0, 0.302438,
+                0.0, 0.0, 0.0, 1.0;
+
+    Mlist[2] << 0.0, -0.0, -1.0, -0.249369,
+                1.0, 0.0, 0.0, 0.000054,
+                -0.0, -1.0, 0.0, -0.065742,
+                0.0, 0.0, 0.0, 1.0;
+
+    Mlist[3] << 0.0, 1.0, 0.0, 0.000178,
+                0.0, 0.0, -1.0, 0.113873,
+                -1.0, 0.0, 0.0, 0.15608,
+                0.0, 0.0, 0.0, 1.0;
+
+    Mlist[4] << 0.0, -0.0, -1.0, -0.174951,
+                1.0, 0.0, 0.0, -0.000483,
+                -0.0, -1.0, 0.0, 0.066288,
+                0.0, 0.0, 0.0, 1.0;
+
+    Mlist[5] << 0.0, 1.0, 0.0, 0.000037,
+                0.0, 0.0, -1.0, -0.107775,
+                -1.0, 0.0, 0.0, 0.104971,
+                0.0, 0.0, 0.0, 1.0;
+
+    Mlist[6] << 0.0, -0.0, -1.0, -0.100829,
+                1.0, 0.0, 0.0, 0.000313,
+                -0.0, -1.0, 0.0, 0.004707,
+                0.0, 0.0, 0.0, 1.0;
+
+    Mlist[7] << 1.0, 0.0, -0.0, -0.000081,
+                0.0, 1.0, -0.0, 0.000466,
+                -0.0, -0.0, 1.0, 0.029209,
+                0.0, 0.0, 0.0, 1.0;
+
+    // Glist 수정: Inertia가 왼쪽 위, mass가 오른쪽 아래로 설정
+    std::vector<Matrix6d> Glist(7);
+    Glist[0] << 11.444445, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 11.444445, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 11.444445, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.35065, 0.000119, -0.000376,
+                 0.0, 0.0, 0.0, 0.000119, 0.304798, -0.109844,
+                 0.0, 0.0, 0.0, -0.000376, -0.109844, 0.060031;
+
+    Glist[1] << 4.433082, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 4.433082, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 4.433082, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.037427, 0.000032, -0.079067,
+                 0.0, 0.0, 0.0, 0.000032, 0.321197, -0.000008,
+                 0.0, 0.0, 0.0, -0.079067, -0.000008, 0.293962;
+
+    Glist[2] << 2.870459, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 2.870459, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 2.870459, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.040982, 0.000007, 0.000009,
+                 0.0, 0.0, 0.0, 0.000007, 0.021068, 0.018172,
+                 0.0, 0.0, 0.0, 0.000009, 0.018172, 0.022775;
+
+    Glist[3] << 2.682061, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 2.682061, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 2.682061, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.016172, -0.000118, 0.033419,
+                 0.0, 0.0, 0.0, -0.000118, 0.113641, -0.000044,
+                 0.0, 0.0, 0.0, 0.033419, -0.000044, 0.100225;
+
+    Glist[4] << 2.129874, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 2.129874, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 2.129874, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.027989, 0.000039, -0.000048,
+                 0.0, 0.0, 0.0, 0.000039, 0.014431, -0.012663,
+                 0.0, 0.0, 0.0, -0.000048, -0.012663, 0.014962;
+
+    Glist[5] << 2.224123, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 2.224123, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 2.224123, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.011053, 0.000055, -0.01482,
+                 0.0, 0.0, 0.0, 0.000055, 0.036983, -0.000037,
+                 0.0, 0.0, 0.0, -0.01482, -0.000037, 0.027548;
+
+    Glist[6] << 0.382549, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.382549, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.382549, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.00079, -0.0, 0.000001,
+                 0.0, 0.0, 0.0, -0.0, 0.000798, -0.000005,
+                 0.0, 0.0, 0.0, 0.000001, -0.000005, 0.000583;
+
+    // ScrewList 설정
+    ScrewList Slist = ScrewList::Zero();  // 적절한 상수 값으로 설정
+ Slist<<-0.      ,  0.3  ,    -0.194    , 0.7495,   -0.003999  ,1.0995  , -0.186999,
+ -0.     ,   0.      ,  0.        ,0.        ,0.        ,0.000001  ,0.      ,
+ -0.     ,   0.    ,    0.       , 0.        ,0.       , 0.       , 0.      ,
+  0.    ,    0.    ,    0.       , 0.000001 , 0.       , 0.000001 , 0.     ,
+  0.    ,   -1.    ,   -0.      , -1.       ,-0.000001 ,-1.       ,-0.000001,
+  1.    ,    0.    ,    1.       ,-0.       , 1.      , -0.000001 , 1.      ;
+
+    // GravityForces 함수 호출
+    MatrixNd result = lr::CoriolisMatrix(thetalist, dthetalist, Mlist, Glist, Slist);
+    
+    // 결과 배열로 변환 (LabVIEW에서 사용할 수 있도록)
+    double* result_array = new double[JOINTNUM*JOINTNUM];
+	int count = 0;
+    for (int i = 0; i < 7; i++) {
+		for(int j= 0;j<7;j++){
+				C_array[count++] = result(j,i);
+		}
+		
+    }
+
+}
+
 
 }
